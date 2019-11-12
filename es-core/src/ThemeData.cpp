@@ -34,6 +34,7 @@ std::map<std::string, std::map<std::string, ThemeData::ElementPropertyType>> The
 		{ "reflexionOnFrame", BOOLEAN },
 		{ "horizontalAlignment", STRING },		
 		{ "verticalAlignment", STRING },
+		{ "roundCorners", FLOAT },
 		{ "flipX", BOOLEAN },
 		{ "flipY", BOOLEAN },
 		{ "zIndex", FLOAT } } },
@@ -127,6 +128,8 @@ std::map<std::string, std::map<std::string, ThemeData::ElementPropertyType>> The
 		{ "cornerSize", NORMALIZED_PAIR },
 		{ "centerColor", COLOR },
 		{ "edgeColor", COLOR },
+		{ "animateColor", COLOR },
+		{ "animateColorTime", FLOAT },
 		{ "zIndex", FLOAT } } },
 	{ "datetime", {
 		{ "pos", NORMALIZED_PAIR },
@@ -153,6 +156,7 @@ std::map<std::string, std::map<std::string, ThemeData::ElementPropertyType>> The
 		{ "rotation", FLOAT },
 		{ "rotationOrigin", NORMALIZED_PAIR },
 		{ "color", COLOR },
+		{ "unfilledColor", COLOR },
 		{ "filledPath", PATH },
 		{ "unfilledPath", PATH },
 		{ "visible", BOOLEAN },
@@ -201,6 +205,8 @@ std::map<std::string, std::map<std::string, ThemeData::ElementPropertyType>> The
 		{ "delay", FLOAT },
 		{ "effect", STRING },
 	 	{ "visible", BOOLEAN },
+		{ "roundCorners", FLOAT },
+		{ "color", COLOR },
 	 	{ "zIndex", FLOAT },		
 		{ "snapshotSource", STRING }, // image, thumbnail, marquee
 		{ "showSnapshotNoVideo", BOOLEAN },
@@ -956,7 +962,14 @@ void ThemeData::parseElement(const pugi::xml_node& root, const std::map<std::str
 			size_t divider = str.find(' ');
 			if(divider == std::string::npos) 
 			{			
-				LOG(LogWarning) << "invalid normalized pair (property \"" << node.name() << "\", value \"" << str.c_str() << "\")";
+				if (str.empty())
+				{
+					LOG(LogWarning) << "invalid normalized pair (property \"" << node.name() << "\", value \"" << str.c_str() << "\")";
+					break;
+				}
+
+				Vector2f val((float)atof(str.c_str()), (float)atof(str.c_str()));
+				element.properties[node.name()] = val;
 				break;
 			}			
 
@@ -974,6 +987,26 @@ void ThemeData::parseElement(const pugi::xml_node& root, const std::map<std::str
 		case PATH:
 		{
 			std::string path = Utils::FileSystem::resolveRelativePath(str, mPaths.back(), true);
+			
+			if (Utils::String::startsWith(path, "{random"))
+			{
+				pugi::xml_node parent = root.parent();
+
+				if (!element.extra)
+					LOG(LogWarning) << "random is only supported in extras";
+				else if (element.type != "image" && element.type != "video")
+					LOG(LogWarning) << "random is only supported in video or image elements";
+				else if (std::string(parent.name()) != "view" || std::string(parent.attribute("name").as_string()) != "system")
+					LOG(LogWarning) << "random is only supported in systemview";
+				else if (element.type == "video" && path != "{random}")
+					LOG(LogWarning) << "video element only supports {random} element";
+				else if (element.type == "image" && path != "{random}" && path != "{random:thumbnail}" && path != "{random:marquee}" && path != "{random:image}")
+					LOG(LogWarning) << "unknow random element " << path;
+				else
+					element.properties[node.name()] = path;
+
+				break;
+			}
 
 #if WIN32
 			path = Utils::String::replace(path,

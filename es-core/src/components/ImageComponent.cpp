@@ -32,6 +32,9 @@ ImageComponent::ImageComponent(Window* window, bool forceLoad, bool dynamic) : G
 	mReflectOnBorders = false;
 	mLoadingTexture = nullptr;
 	mAllowFading = true;
+	mRoundCorners = 0.0f;
+	mShowing = false;
+	mPlaylistTimer = 0;
 }
 
 ImageComponent::~ImageComponent()
@@ -356,6 +359,31 @@ void ImageComponent::updateVertices()
 	}
 }
 
+#include <SDL_opengl.h>
+
+#define N_ROUNDING_PIECES 10
+
+void DrawGLRoundedCorner(int x, int y, double sa, double arc, float r) 
+{	
+	// centre of the arc, for clockwise sense
+	float cent_x = x + r * cos(sa + ES_PI / 2);
+	float cent_y = y + r * sin(sa + ES_PI / 2);
+
+	// build up piecemeal including end of the arc
+	int n = ceil(N_ROUNDING_PIECES * arc / ES_PI * 2);
+	for (int i = 0; i <= n; i++) 
+	{
+		double ang = sa + arc * (double)i / (double)n;
+
+		// compute the next point
+		float next_x = cent_x + r * sin(ang);
+		float next_y = cent_y - r * cos(ang);
+	
+		glColor3f(1.0f, 1.0f, 1.0f);
+		glVertex2f(next_x, next_y);
+	}
+}
+
 void ImageComponent::render(const Transform4x4f& parentTrans)
 {
 	if (!mVisible)
@@ -399,13 +427,12 @@ void ImageComponent::render(const Transform4x4f& parentTrans)
 
 		if (mHorizontalAlignment == ALIGN_LEFT)
 			trans.translate(Vector3f(targetSizePos.x(), 0, 0.0f));
-		else if (mHorizontalAlignment == ALIGN_BOTTOM)
-			trans.translate(Vector3f(targetSizePos.x(), targetSizePos.y() + mTargetSize.y() - mSize.y(), 0.0f));
+		else if (mHorizontalAlignment == ALIGN_RIGHT)
+			trans.translate(Vector3f(targetSizePos.x() + mTargetSize.x() - mSize.x(), targetSizePos.y(), 0.0f));
 
 		Renderer::setMatrix(trans);
 
 		fadeIn(true);
-
 
 		float opacity = (mOpacity * (mFading ? mFadeOpacity / 255.0 : 1.0)) / 255.0;
 
@@ -417,7 +444,33 @@ void ImageComponent::render(const Transform4x4f& parentTrans)
 		mVertices[2].col = mColorGradientHorizontal ? color : colorEnd;
 		mVertices[3].col = colorEnd;
 
+		if (mRoundCorners > 0)
+		{
+			float x = 0;
+			float y = 0;
+			float size_x = mSize.x();
+			float size_y = mSize.y();
+			
+			
+			if (mTargetIsMin)
+			{
+				x = targetSizePos.x();
+				y = targetSizePos.y();
+				size_x = mTargetSize.x();
+				size_y = mTargetSize.y();
+			}			
+
+			float radius = Math::max(size_x, size_y) * mRoundCorners;
+
+			Renderer::enableRoundCornerStencil(x, y, size_x, size_y, radius);
+
+			mTexture->bind();
+		}			
+	
 		Renderer::drawTriangleStrips(&mVertices[0], 4);
+		
+		if (mRoundCorners > 0)
+			Renderer::disableStencil();			
 
 		if (mMirror.x() != 0 || mMirror.y() != 0)
 		{
@@ -553,7 +606,7 @@ void ImageComponent::applyTheme(const std::shared_ptr<ThemeData>& theme, const s
 	if(properties & PATH && elem->has("path"))
 	{
 		auto path = elem->get<std::string>("path");
-		if (Utils::FileSystem::exists(path))
+		if (ResourceManager::getInstance()->fileExists(path))
 		{
 			bool tile = (elem->has("tile") && elem->get<bool>("tile"));
 			setImage(path, tile/*, Vector2f(mTargetSize.x(), mTargetSize.y())*/);
@@ -624,6 +677,9 @@ void ImageComponent::applyTheme(const std::shared_ptr<ThemeData>& theme, const s
 	else
 		setZIndex(getDefaultZIndex());
 
+	if (properties & ALIGNMENT && elem->has("roundCorners"))
+		mRoundCorners = elem->get<float>("roundCorners");
+
 	if(properties & ThemeFlags::VISIBLE && elem->has("visible"))
 		setVisible(elem->get<bool>("visible"));
 	else
@@ -635,4 +691,57 @@ std::vector<HelpPrompt> ImageComponent::getHelpPrompts()
 	std::vector<HelpPrompt> ret;
 	ret.push_back(HelpPrompt("a", _("SELECT")));
 	return ret;
+}
+
+
+
+void ImageComponent::setPlaylist(std::shared_ptr<IPlaylist> playList)
+{
+	mPlaylist = playList;
+	if (mPlaylist == nullptr)
+		return;
+
+	auto image = mPlaylist->getNextItem();
+	if (!image.empty())
+		setImage(image);
+}
+
+void ImageComponent::onShow()
+{
+	GuiComponent::onShow();
+
+	if (!mShowing && mPlaylist != nullptr && !mPath.empty())
+	{
+		auto item = mPlaylist->getNextItem();
+		if (!item.empty())
+			setImage(item, false, getMaxSizeInfo());
+	}
+
+	mShowing = true;	
+}
+
+void ImageComponent::onHide()
+{
+	GuiComponent::onHide();
+	mShowing = false;	
+}
+
+
+void ImageComponent::update(int deltaTime)
+{
+	GuiComponent::update(deltaTime);
+
+	if (mPlaylist != nullptr && mShowing)
+	{
+		mPlaylistTimer += deltaTime;
+
+		if (mPlaylistTimer >= 10000)
+		{
+			auto item = mPlaylist->getNextItem();
+			if (!item.empty())
+				setImage(item, false, getMaxSizeInfo());
+
+			mPlaylistTimer = 0.0;
+		}
+	}
 }

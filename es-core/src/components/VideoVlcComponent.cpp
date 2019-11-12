@@ -62,6 +62,7 @@ VideoVlcComponent::VideoVlcComponent(Window* window, std::string subtitles) :
 	mMedia(nullptr)
 {
 	mElapsed = 0;
+	mColorShift = 0xFFFFFFFF;
 
 	// Get an empty texture for rendering the video
 	mTexture = nullptr;// TextureResource::get("");
@@ -185,6 +186,11 @@ void VideoVlcComponent::resize()
 	onSizeChanged();
 }
 
+void VideoVlcComponent::setColorShift(unsigned int color)
+{
+	mColorShift = color;
+}
+
 void VideoVlcComponent::render(const Transform4x4f& parentTrans)
 {
 	if (!isVisible())
@@ -216,11 +222,12 @@ void VideoVlcComponent::render(const Transform4x4f& parentTrans)
 	if (t == 0.0)
 		return;
 
+	
 	Transform4x4f trans = parentTrans * getTransform();
-
-	if (!Renderer::isVisibleOnScreen(trans.translation().x(), trans.translation().y(), mSize.x(), mSize.y()))
+	
+	if (mRotation == 0 && !mTargetIsMin && !Renderer::isVisibleOnScreen(trans.translation().x(), trans.translation().y(), mSize.x(), mSize.y()))
 		return;
-
+		
 	GuiComponent::renderChildren(trans);
 	Renderer::setMatrix(trans);
 
@@ -254,9 +261,11 @@ void VideoVlcComponent::render(const Transform4x4f& parentTrans)
 
 	if (mTexture == nullptr)
 		return;
-
+		
 	const unsigned int fadeIn = t * 255.0f;
-	const unsigned int color = Renderer::convertColor(0xFFFFFF00 | fadeIn);
+	float opacity = mOpacity * fadeIn;
+	const unsigned int color = Renderer::convertColor(mColorShift & 0xFFFFFF00 | (unsigned char)((mColorShift & 0xFF) * opacity));
+	
 	Renderer::Vertex   vertices[4];
 
 	if (mEffect == VideoVlcFlags::VideoVlcEffect::BUMP && mFadeIn > 0.0 && mFadeIn < 1.0 && mConfig.startDelay > 0)
@@ -291,17 +300,41 @@ void VideoVlcComponent::render(const Transform4x4f& parentTrans)
 
 	if (mTexture->bind())
 	{
-		if (mTargetIsMin)
-		{
-			Vector2f targetPos = (mTargetSize - mSize) * mOrigin * -1;
+		Vector2f targetSizePos = (mTargetSize - mSize) * mOrigin * -1;
 
-			Vector2i pos(trans.translation().x() + (int)targetPos.x(), trans.translation().y() + (int)targetPos.y());
+		if (mTargetIsMin)
+		{			
+			Vector2i pos(trans.translation().x() + (int)targetSizePos.x(), trans.translation().y() + (int)targetSizePos.y());
 			Vector2i size((int)mTargetSize.round().x(), (int)mTargetSize.round().y());
 			Renderer::pushClipRect(pos, size);
 		}
 
+		if (mRoundCorners > 0)
+		{
+			float x = 0;
+			float y = 0;
+			float size_x = mSize.x();
+			float size_y = mSize.y();
+			
+			if (mTargetIsMin)
+			{
+				x = targetSizePos.x();
+				y = targetSizePos.y();
+				size_x = mTargetSize.x();
+				size_y = mTargetSize.y();
+			}
+			
+			float radius = Math::max(size_x, size_y) * mRoundCorners;
+			Renderer::enableRoundCornerStencil(x, y, size_x, size_y, radius);
+
+			mTexture->bind();
+		}
+
 		// Render it
 		Renderer::drawTriangleStrips(&vertices[0], 4);
+
+		if (mRoundCorners > 0)
+			Renderer::disableStencil();
 
 		if (mTargetIsMin)
 			Renderer::popClipRect();
@@ -377,6 +410,19 @@ void VideoVlcComponent::handleLooping()
 		libvlc_state_t state = libvlc_media_player_get_state(mMediaPlayer);
 		if (state == libvlc_Ended)
 		{
+			if (mPlaylist != nullptr)
+			{
+				auto nextVideo = mPlaylist->getNextItem();
+				if (!nextVideo.empty())
+				{
+					stopVideo();
+					setVideo(nextVideo);
+					return;
+				}
+				else
+					mPlaylist = nullptr;
+			}
+			
 			if (mVideoEnded != nullptr)
 			{
 				bool cont = mVideoEnded();
@@ -525,6 +571,15 @@ void VideoVlcComponent::applyTheme(const std::shared_ptr<ThemeData>& theme, cons
 			mEffect = VideoVlcFlags::VideoVlcEffect::BUMP;
 		else
 			mEffect = VideoVlcFlags::VideoVlcEffect::NONE;
+	}
+
+	if (elem && elem->has("roundCorners"))
+		mRoundCorners = elem->get<float>("roundCorners");
+	
+	if (properties & COLOR)
+	{
+		if (elem && elem->has("color"))
+			setColorShift(elem->get<unsigned int>("color"));
 	}
 }
 
