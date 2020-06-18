@@ -1689,7 +1689,7 @@ void GuiMenu::addVersionInfo()
 	}
 	else
 #endif
-		mVersion.setText("EMULATIONSTATION V" + Utils::String::toUpper(PROGRAM_VERSION_STRING) + " BUILD " + buildDate);
+		mVersion.setText("EMULATIONSTATION V" + Utils::String::toUpper(PROGRAM_VERSION_STRING) + " RGBUX ");
 
 	mVersion.setHorizontalAlignment(ALIGN_CENTER);	
 	mVersion.setVerticalAlignment(ALIGN_CENTER);
